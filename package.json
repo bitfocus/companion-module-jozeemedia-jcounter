@@ -1,0 +1,27 @@
+{
+	"name": "jozeemedia-jcounter",
+	"version": "1.0.0",
+	"api_version": "1.0.0",
+	"keywords": [
+		"jcounter",
+		"timer"
+	],
+	"manufacturer": "Jozee Media",
+	"product": "J-Counter",
+	"shortname": "j-counter",
+	"description": "Companion module for Jozee Media J-Counter",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "Joseph Adams <josephdadams@gmail.com>",
+	"license": "MIT",
+	"homepage": "https://github.com/bitfocus/companion-module-jozeemedia-jcounter#readme",
+	"bugs": {
+		"url": "https://github.com/bitfocus/companion-module-jozeemedia-jcounter/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git"
+	}
+}
