@@ -354,7 +354,7 @@ instance.prototype.actions = function(system) {
 		],
 		callback: function (action, bank) {
 			let timer = action.options.timer;
-			let path = 'secplusthirteen';
+			let path = 'secplusthirty';
 			let cmd = '/' + timer + path;
 			self.oscSend(self.config.host, self.config.port, cmd, []);
 		}
@@ -414,7 +414,7 @@ instance.prototype.actions = function(system) {
 		],
 		callback: function (action, bank) {
 			let timer = action.options.timer;
-			let path = 'secminusthirteen';
+			let path = 'secminusthirty';
 			let cmd = '/' + timer + path;
 			self.oscSend(self.config.host, self.config.port, cmd, []);
 		}
@@ -454,7 +454,7 @@ instance.prototype.actions = function(system) {
 		],
 		callback: function (action, bank) {
 			let timer = action.options.timer;
-			let path = 'addthirteen';
+			let path = 'addthirty';
 			let cmd = '/' + timer + path;
 			self.oscSend(self.config.host, self.config.port, cmd, []);
 		}
