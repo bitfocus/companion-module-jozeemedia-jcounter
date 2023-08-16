@@ -1,27 +1,24 @@
 {
 	"name": "jozeemedia-jcounter",
-	"version": "1.0.1",
-	"api_version": "1.0.0",
-	"keywords": [
-		"jcounter",
-		"timer"
-	],
-	"manufacturer": "Jozee Media",
-	"product": "J-Counter",
-	"shortname": "j-counter",
-	"description": "Companion module for Jozee Media J-Counter",
-	"main": "index.js",
+	"version": "2.0.1",
+	"main": "main.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"format": "prettier -w ."
 	},
-	"author": "Joseph Adams <josephdadams@gmail.com>",
 	"license": "MIT",
-	"homepage": "https://github.com/bitfocus/companion-module-jozeemedia-jcounter#readme",
-	"bugs": {
-		"url": "https://github.com/bitfocus/companion-module-jozeemedia-jcounter/issues"
-	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git"
-	}
+		"url": "git+https://github.com/bitfocus/companion-module-J-Counter.git"
+	},
+	"dependencies": {
+		"@companion-module/base": "~1.4.0",
+		"dgram": "^1.0.1",
+		"osc": "^2.4.4",
+		"presets": "^0.1.0",
+		"udp": "^1.0.0"
+	},
+	"devDependencies": {
+		"@companion-module/tools": "^2.1.0"
+	},
+	"prettier": "@companion-module/tools/.prettierrc.json"
 }
