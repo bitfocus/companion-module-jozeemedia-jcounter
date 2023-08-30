@@ -8,14 +8,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bitfocus/companion-module-J-Counter.git"
+		"url": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git"
 	},
 	"dependencies": {
 		"@companion-module/base": "~1.4.0",
-		"dgram": "^1.0.1",
-		"osc": "^2.4.4",
-		"presets": "^0.1.0",
-		"udp": "^1.0.0"
+		"osc": "^2.4.4"
 	},
 	"devDependencies": {
 		"@companion-module/tools": "^1.3.2"

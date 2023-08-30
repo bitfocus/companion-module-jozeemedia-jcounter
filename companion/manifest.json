@@ -1,12 +1,12 @@
 {
-	"id": "J-Counter",
+	"id": "jozeemedia-jcounter",
 	"name": "jozeemedia-jcounter",
 	"shortname": "",
 	"description": "Countdown Timer for windows",
 	"version": "2.1.0",
 	"license": "MIT",
-	"repository": "git+https://github.com/bitfocus/companion-module-J-Counter.git",
-	"bugs": "https://github.com/bitfocus/companion-module-J-Counter/issues",
+	"repository": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git",
+	"bugs": "https://github.com/bitfocus/companion-module-jozeemedia-jcounter/issues",
 	"maintainers": [
 		{
 			"name": "Jozee Media",
