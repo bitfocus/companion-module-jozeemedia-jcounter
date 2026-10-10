@@ -1,341 +1,281 @@
+'use strict'
 
 const { InstanceBase, Regex, runEntrypoint, InstanceStatus } = require('@companion-module/base')
-const UpgradeScripts = require('./upgrades')
+const OSC = require('osc')
 const UpdateActions = require('./actions')
 const UpdateFeedbacks = require('./feedbacks')
-const presets = require('./presets')
-const UpdateVariableDefinitions = require('./variables')
-const http = require('http')
-const OSC = require('osc')
+const UpdateVariables = require('./variables')
+const UpdatePresets = require('./presets')
+const UpgradeScripts = require('./upgrades')
 
-class ModuleInstance extends InstanceBase {
-	constructor(internal) {
-		super(internal)
-		Object.assign(this, {
+class JCounterModule extends InstanceBase {
+  constructor(internal) {
+    super(internal)
+    this.timers = []
+    this.pendingSnapshot = null
+    this.osc = null
+    this.socketReady = false
+    this.pollTimer = null
+    this.lastSeen = 0
+    this.isConnected = false
+    this.choicesSignature = ''
+    this.messageActive = false
+    this.messageState = { active: false, template: 0, text: '', remaining: 0, displays: '', web: false }
+    this.blackoutActive = false
+    this.ndiState = { running: false, connections: 0, display: 1, alpha: true, audio: true, name: '' }
+    this.pendingExtended = null
+  }
 
-			...presets
+  async init(config) {
+    this.config = config
+    this.updateStatus(InstanceStatus.Connecting)
+    this.updateDefinitions()
+    this.startUdp()
+  }
 
-		})
-	}
-	async init(config) {
-		this.config = config
-		this.updateStatus('connecting')
-		this.oscserverinit()
-		this.log('debug', 'Starting definition of actions feedbacks and variables')
-		this.updateActions()
-		this.updateFeedbacks() 
-		this.updateVariableDefinitions()
-		this.updateStatus('ok')
-		this.setPresets()
-		global.fb1 = 1
-		global.fb2 = 21
-		global.fb3 = 1
-		global.fb4 = 21
-	}
+  updateDefinitions() {
+    UpdateVariables(this)
+    UpdateActions(this)
+    UpdateFeedbacks(this)
+    UpdatePresets(this)
+    UpdateVariables.update(this)
+  }
 
-	async destroy() {
-		this.log('debug', 'destroy method started')
-		this.osc.close()
-		this.log('debug', 'osc closed')
-		delete this.osc
-		this.log('debug', 'this.osc deleted')
-		this.log('debug', 'destroy')
-	}
+  getTimerChoices() {
+    const numbers = Array.from({ length: 8 }, (_, i) => ({
+      id: String(i + 1), label: `Position ${i + 1}`,
+    }))
+    const discovered = this.timers.map((t) => ({
+      id: t.id, label: `${t.position}: ${t.name} (${t.mode})`,
+    }))
+    return [...numbers, ...discovered]
+  }
 
+  resolveTimer(selection) {
+    const value = String(selection ?? '')
+    if (/^[1-8]$/.test(value)) return this.timers[Number(value) - 1] || null
+    return this.timers.find((t) => t.id === value) || null
+  }
 
-	async configUpdated(config) {
-		this.config = config
-		if (this.config.port != this.osc.options.localPort || this.config.host != this.osc.remoteAddress) {
-			this.log('debug', 'host or port configuration changed - reloading osc server')
-			this.oscserverinit()
-		}
-	}
+  sendOsc(address, args = []) {
+    const host = this.config?.host
+    const port = Number(this.config?.port) || 7802
+    if (!host || !this.osc || !this.socketReady) return
+    try {
+      const typedArgs = args.map((value) => Number.isInteger(value)
+        ? { type: 'i', value }
+        : { type: 's', value: String(value) })
+      this.osc.send({ address, args: typedArgs }, host, port)
+    } catch (error) {
+      this.log('warn', `OSC send failed: ${error.message}`)
+    }
+  }
 
-	oscserverinit() {
+  sendTimer(selection, operation, args = []) {
+    const value = String(selection ?? '')
+    // Stable ID: survives title and position changes. Position addresses are
+    // also supported for direct OSC integrations / stock Companion presets.
+    if (!/^[a-f0-9]{32}$/i.test(value) && !/^[1-8]$/.test(value)) return
+    this.sendOsc(`/jcounter/timer/${value}/${operation}`, args)
+  }
 
-			var self = this
-			this.log('info', 'osc_server_init method started')
-			if (this.osc) {
-				try {
+  startUdp() {
+    this.closeUdp()
+    const host = this.config?.host
+    const localPort = Number(this.config?.feedbackPort) || 7803
+    if (!host || !Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) {
+      this.updateStatus(InstanceStatus.BadConfig, 'Enter J-Counter IP and valid feedback port')
+      return
+    }
+    this.osc = new OSC.UDPPort({
+      localAddress: '0.0.0.0',
+      localPort,
+      metadata: true,
+      unpackSingleArgs: false,
+    })
+    this.osc.on('ready', () => {
+      this.socketReady = true
+      this.sendOsc('/jcounter/subscribe', [localPort])
+      this.pollTimer = setInterval(() => {
+        this.sendOsc('/jcounter/subscribe', [localPort])
+        if (this.isConnected && Date.now() - this.lastSeen > 8000) {
+          this.isConnected = false
+          this.timers = []
+          this.updateStatus(InstanceStatus.ConnectionFailure, 'J-Counter OSC not responding')
+          UpdateVariables.update(this)
+          this.checkFeedbacks()
+        }
+      }, 3000)
+    })
+    this.osc.on('message', (message) => this.onMessage(message))
+    this.osc.on('error', (error) => {
+      this.log('error', `OSC socket error: ${error.message}`)
+      this.updateStatus(InstanceStatus.ConnectionFailure, `OSC: ${error.message}`)
+    })
+    this.osc.open()
+  }
 
-					this.osc.close()
-					delete this.osc
-				} catch (e) {
-				}
-			}
-			this.osc = new OSC.UDPPort({
-				localAddress: this.config.host,
-				//remoteAddress: '192.168.8.161',
-				localPort: this.config.feedbackPort,
-				//remotePort: 7803,
-				broadcast: true,
-				metadata: true,
-			})
+  onMessage(msg) {
+    // OSC.js metadata is enabled to ensure commands use real OSC int32 types.
+    // Leave incoming arguments in a consistent array, even for one value.
+    const items = Array.isArray(msg.args) ? msg.args : msg.args == null ? [] : [msg.args]
+    const args = items.map((item) => item && typeof item === 'object' && 'value' in item ? item.value : item)
+    if (msg.address === '/jcounter/error') {
+      this.log('warn', `J-Counter rejected OSC command: ${args.join(' — ')}`)
+      return
+    }
+    if (msg.address === '/jcounter/blackout/state') {
+      if (args.length >= 1) {
+        this.blackoutActive = Number(args[0]) === 1
+        UpdateVariables.update(this)
+        this.checkFeedbacks()
+      }
+      return
+    }
+    if (msg.address === '/jcounter/message/state') {
+      if (args.length >= 1) {
+        const active = Number(args[0]) === 1
+        this.messageActive = active
+        this.messageState = {
+          active,
+          template: Number(args[1] || 0),
+          text: String(args[2] || ''),
+          remaining: Number(args[3] ?? 0),
+          displays: String(args[4] || ''),
+          web: Number(args[5] || 0) === 1,
+        }
+        UpdateVariables.update(this)
+        this.checkFeedbacks()
+      }
+      return
+    }
+    if (msg.address === '/jcounter/ndi/state') {
+      if (args.length >= 1) {
+        this.ndiState = {
+          running: Number(args[0]) === 1,
+          connections: Number(args[1] || 0),
+          display: Number(args[2] || 1),
+          alpha: Number(args[3] || 0) === 1,
+          audio: Number(args[4] || 0) === 1,
+          name: String(args[5] || ''),
+        }
+        UpdateVariables.update(this)
+        this.checkFeedbacks()
+      }
+      return
+    }
+    if (msg.address === '/jcounter/hello') {
+      if (args[0] !== '3.0') {
+        this.updateStatus(InstanceStatus.ConnectionFailure, 'Unsupported J-Counter OSC protocol')
+        return
+      }
+      this.lastSeen = Date.now()
+      if (!this.isConnected) {
+        this.isConnected = true
+        this.updateStatus(InstanceStatus.Ok)
+        UpdateVariables.update(this)
+      }
+      this.pendingSnapshot = new Map()
+      this.pendingExtended = new Map()
+      return
+    }
+    if (msg.address === '/jcounter/timer/extended') {
+      if (!this.pendingSnapshot || args.length < 9 ||
+          typeof args[0] !== 'string' || !/^[a-f0-9]{32}$/i.test(args[0])) return
+      const ext = {
+        progressVisible: Number(args[1]) === 1,
+        progressPercent: Math.max(0, Math.min(100, Number(args[2]) || 0)),
+        endAt: String(args[3] || ''),
+        smpteActive: Number(args[4]) === 1,
+        smpteRate: String(args[5] || ''),
+        externalTitle: String(args[6] || ''),
+        externalTimeMode: String(args[7] || ''),
+        externalConnection: String(args[8] || ''),
+      }
+      const timer = this.pendingSnapshot.get(args[0])
+      if (timer) Object.assign(timer, ext)
+      else this.pendingExtended?.set(args[0], ext)
+      return
+    }
+    if (msg.address === '/jcounter/timer/state') {
+      if (!this.pendingSnapshot || args.length < 13 ||
+          typeof args[0] !== 'string' || !/^[a-f0-9]{32}$/i.test(args[0])) return
+      const timer = {
+        id: args[0], name: String(args[1]), mode: String(args[2]),
+        time: String(args[3]), status: String(args[4]), round: String(args[5]),
+        roundNumber: Number(args[6]), roundCount: Number(args[7]), loop: Number(args[8]) === 1,
+        background: String(args[9]), timeColor: String(args[10]), visible: Number(args[11]) === 1,
+        position: Number(args[12]),
+      }
+      if (timer.position < 1 || timer.position > 8) return
+      const ext = this.pendingExtended?.get(timer.id)
+      if (ext) Object.assign(timer, ext)
+      else {
+        const previous = this.timers.find((old) => old.id === timer.id)
+        if (previous) {
+          for (const key of ['progressVisible', 'progressPercent', 'endAt', 'smpteActive',
+            'smpteRate', 'externalTitle', 'externalTimeMode', 'externalConnection']) {
+            if (key in previous) timer[key] = previous[key]
+          }
+        }
+      }
+      this.pendingSnapshot.set(timer.id, timer)
+      return
+    }
+    if (msg.address === '/jcounter/timers/end') {
+      const count = Number(args[0])
+      if (!this.pendingSnapshot || count !== this.pendingSnapshot.size || count < 0 || count > 8) return
+      this.timers = [...this.pendingSnapshot.values()].sort((a, b) => a.position - b.position)
+      this.pendingSnapshot = null
+      this.pendingExtended = null
+      UpdateVariables.update(this)
+      this.checkFeedbacks()
+      const signature = this.timers.map((t) => `${t.id}:${t.name}:${t.mode}:${t.position}`).join('|')
+      if (signature !== this.choicesSignature) {
+        this.choicesSignature = signature
+        UpdateActions(this)
+        UpdateFeedbacks(this)
+      }
+    }
+  }
 
-		this.osc.on('ready', () => {
+  closeUdp() {
+    this.socketReady = false
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    this.pollTimer = null
+    if (this.osc) {
+      try { this.osc.close() } catch (_error) { /* already closed */ }
+      this.osc = null
+    }
+    this.isConnected = false
+    this.messageActive = false
+    this.messageState = { active: false, template: 0, text: '', remaining: 0, displays: '', web: false }
+    this.blackoutActive = false
+    this.ndiState = { running: false, connections: 0, display: 1, alpha: true, audio: true, name: '' }
+    this.pendingSnapshot = null
+    this.pendingExtended = null
+    this.choicesSignature = ''
+  }
 
+  async configUpdated(config) {
+    this.config = config
+    this.timers = []
+    this.updateDefinitions()
+    this.updateStatus(InstanceStatus.Connecting)
+    this.startUdp()
+  }
 
-		})
-		this.osc.on('message', (message) => this.onMessage(message))
-		this.osc.on('error', (err) => {
-			this.log('info', err.code)
-			if (err.code == 'EADDRINUSE') {
-				this.log('error', `Error: Selected feedback port ${err.message.split(':')[1]} is already in use.`)
-				this.updateStatus('bad_config', 'Feedback port conflict')
-			}
-		})
-		this.osc.open()
+  async destroy() {
+    this.closeUdp()
+  }
 
-			this.log('info', `osc_server_init method finished ${this.osc}`)
-		}
-	onMessage(oscMsg) {
-		//this.log('debug', oscMsg.address)
-		if (oscMsg.address.startsWith('/msgonair')) {
-			UpdateVariableDefinitions(this)
-			this.setVariableValues({ timer2: 'MSG' })
-			this.setVariableValues({ timer2s: 'MSG' })
-			global.fb2 = 23
-			this.checkFeedbacks('ChannelState2')
-		}
-		else {
-			if (oscMsg.address.startsWith('/msgoffair')) {
-				UpdateVariableDefinitions(this)
-				this.setVariableValues({ timer2: 'TMR 2' })
-				this.setVariableValues({ timer2s: 'TMR 2' })
-				global.fb2 = 24
-				this.checkFeedbacks('ChannelState2')
-			}
-			if (oscMsg.address.startsWith('/tmr1init')) {
-				UpdateVariableDefinitions(this)
-				this.setVariableValues({ timer1: 'TMR 1' })
-				this.setVariableValues({ timer1s: 'TMR 1' })
-				global.fb1 = 24
-				this.checkFeedbacks('ChannelState2')
-			}
-		if (oscMsg.address.startsWith('/jcountrtmr1/data')) {
-			UpdateVariableDefinitions(this)
-			const words = oscMsg.address.substr(oscMsg.address.length - 8);
-			const wordss = oscMsg.address.substr(oscMsg.address.length - 5);
-			this.setVariableValues({ timer1: words })
-			this.setVariableValues({ timer1s: wordss })
-		}
-			if (oscMsg.address.startsWith('/jcountrtmr2/data')) {
-				UpdateVariableDefinitions(this)
-				const words = oscMsg.address.substr(oscMsg.address.length - 8);
-				const wordss = oscMsg.address.substr(oscMsg.address.length - 5);
-				this.setVariableValues({ timer2: words })
-				this.setVariableValues({ timer2s: wordss })
-
-			}
-		} if (oscMsg.address === ('/jcountrtmr1/colfSilver')) {
-			global.fb1 = 1
-			this.checkFeedbacks('ChannelState')
-		}		
-		if (oscMsg.address === ('/jcountrtmr1/colfGray')) {
-			global.fb1 = 2
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfRed')) {
-			global.fb1 = 3
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfPaleGreen')) {
-			global.fb1 = 4
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfDeepSkyBlue')) {
-			global.fb1 = 5
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfOrange')) {
-			global.fb1 = 6
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfRoyalBlue')) {
-			global.fb1 = 7
-			this.checkFeedbacks('ChannelState')
-		}			
-		if (oscMsg.address === ('/jcountrtmr1/colfBrown')) {
-			global.fb1 = 8
-			this.checkFeedbacks('ChannelState')
-		 }
-		if (oscMsg.address === ('/jcountrtmr1/colfTeal')) {
-			global.fb1 = 9
-			this.checkFeedbacks('ChannelState')
-		}
-		if (oscMsg.address === ('/jcountrtmr1/colbBlack')) {
-			global.fb1 = 21
-			this.checkFeedbacks('ChannelState')
-		}
-		if (oscMsg.address === ('/jcountrtmr1/colbRed')) {
-			global.fb1 = 22
-			this.checkFeedbacks('ChannelState')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfSilver')) {
-			global.fb2 = 1
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfGray')) {
-			global.fb2 = 2
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfRed')) {
-			global.fb2 = 3
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfPaleGreen')) {
-			global.fb2 = 4
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfDeepSkyBlue')) {
-			global.fb2 = 5
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfOrange')) {
-			global.fb2 = 6
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfRoyalBlue')) {
-			global.fb2 = 7
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfBrown')) {
-			global.fb2 = 8
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colfTeal')) {
-			global.fb2 = 9
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colbBlack')) {
-			global.fb2 = 21
-			this.checkFeedbacks('ChannelState2')
-		}
-		if (oscMsg.address === ('/jcountrtmr2/colbRed')) {
-			global.fb2 = 22
-			this.checkFeedbacks('ChannelState2')
-		}
-		
-	}
-	getConfigFields() {
-
-		return [
-			{
-				type: 'textinput',
-				id: 'host',
-				label: 'J-Counter IP Address',
-				tooltip: 'The IP of the computer which J-Counter is running on. * 127.0.0.1 might not work',
-				width: 6,
-				default: '',
-				regex: Regex.IP,
-			},
-
-			{
-				type: 'textinput',
-				id: 'port',
-				label: 'Target Port (default 7802)',
-				tooltip: 'The Port Number for controlling J-Counter.',
-				width: 6,
-				default: 7802,
-				regex: Regex.PORT,
-			},
-			{
-				type: 'textinput',
-				id: 'feedbackPort',
-				label: 'Feedback Port (default 7803)',
-				tooltip: 'The Port Number for receving data from J-Counter.',
-				width: 6,
-				default: 7803,
-				regex: Regex.PORT,
-			},
-
-		]
-	}
-
-	updateActions() {
-		UpdateActions(this)
-	}
-
-	updateFeedbacks() {
-		UpdateFeedbacks(this)
-	}
-	updatePresets() {
-		UpdateFeedbacks(this)
-	}
-
-	updateVariableDefinitions() {
-		UpdateVariableDefinitions(this)
-	}
-
-
-	executeAction = (action) => {
-		var self = this
-		var url = 'http://' + self.config.host + ':' + self.config.port
-
-		switch (action.actionId) {
-			case 'trigger_cw':
-				var requestJSON = {
-					action: action.options.action_dropdown,
-					motions: [action.options.motion_name],
-					channel: action.options.channel_dropdown,
-				}
-				break
-
-			case 'set_text':
-				var requestJSON = {
-					action: 'set_text',
-					layer: action.options.motion_name + '\\' + action.options.text_layer,
-					value: action.options.text_value,
-					channel: action.options.channel_dropdown,
-				}
-				break
-
-			case 'activate_grid':
-				var data = action.options.grid_cell.split(',')
-				var cw_gridrow = parseInt(data[0])
-				var cw_gridcolumn = parseInt(data[1])
-				var cw_cell_array = [cw_gridrow, cw_gridcolumn]
-
-				var requestJSON = {
-					action: 'activate_grid_cell',
-					grid: action.options.grid_name,
-					cell: cw_cell_array,
-				}
-				break
-		}
-
-		var postData = JSON.stringify(requestJSON)
-		var requestData = {
-			host: self.config.host,
-			path: '/',
-			port: self.config.port,
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Content-Length': Buffer.byteLength(postData),
-			},
-		}
-
-		var buffer = ''
-
-		var req = http.request(requestData, function (res) {
-			console.log(res.statusCode)
-			var buffer = ''
-			res.on('data', function (data) {
-				buffer = buffer + data
-			})
-			res.on('end', function (data) {
-				console.log(buffer)
-			})
-		})
-
-		req.on('error', function (e) {
-			console.log('Problem with request: ' + e.message)
-		})
-
-		req.write(postData)
-		req.end()
-	}
+  getConfigFields() {
+    return [
+      { type: 'textinput', id: 'host', label: 'J-Counter computer IP address', default: '', width: 6, regex: Regex.IP },
+      { type: 'textinput', id: 'port', label: 'Target OSC UDP port', default: '7802', width: 6, regex: Regex.PORT },
+      { type: 'textinput', id: 'feedbackPort', label: 'Local feedback UDP port', default: '7803', width: 6, regex: Regex.PORT },
+    ]
+  }
 }
 
-runEntrypoint(ModuleInstance, UpgradeScripts)
+runEntrypoint(JCounterModule, UpgradeScripts)

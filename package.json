@@ -1,21 +1,23 @@
 {
-	"name": "jozeemedia-jcounter",
-	"version": "2.0.1",
-	"main": "main.js",
-	"scripts": {
-		"format": "prettier -w ."
-	},
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git"
-	},
-	"dependencies": {
-		"@companion-module/base": "~1.4.0",
-		"osc": "^2.4.4"
-	},
-	"devDependencies": {
-		"@companion-module/tools": "^2.8.0"
-	},
-	"prettier": "@companion-module/tools/.prettierrc.json"
+  "name": "jozeemedia-jcounter",
+  "version": "3.0.0",
+  "main": "main.js",
+  "scripts": {
+    "format": "prettier -w .",
+    "package": "companion-module-build"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfocus/companion-module-jozeemedia-jcounter.git"
+  },
+  "dependencies": {
+    "@companion-module/base": "^1.12.0",
+    "osc": "^2.4.4"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "~2.8.0"
+  },
+  "prettier": "@companion-module/tools/.prettierrc.json",
+  "packageManager": "yarn@1.22.22"
 }
