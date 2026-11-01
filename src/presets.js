@@ -57,13 +57,13 @@ module.exports = function (self) {
     type: 'button', category: 'Global', name: 'BLACKOUT / RESTORE',
     style: { text: 'BLACKOUT\nRESTORE', size: '14', color: white, bgcolor: combineRgb(57, 68, 81) },
     steps: [{ down: [{ actionId: 'blackout', options: { operation: 'toggle' } }], up: [] }],
-    feedbacks: [{ feedbackId: 'blackout', options: {} }],
+    feedbacks: [{ feedbackId: 'blackout', options: {}, style: { bgcolor: combineRgb(172, 52, 67), color: white } }],
   }
   presets.message1_show = {
     type: 'button', category: 'Messages', name: 'SHOW MESSAGE 1',
     style: { text: 'MESSAGE 1\nSHOW', size: '14', color: white, bgcolor: combineRgb(57, 68, 81) },
     steps: [{ down: [{ actionId: 'message', options: { operation: 'show', template: '1' } }], up: [] }],
-    feedbacks: [{ feedbackId: 'message_active', options: {} }],
+    feedbacks: [{ feedbackId: 'message_active', options: {}, style: { bgcolor: combineRgb(195, 162, 53), color: combineRgb(45, 36, 16) } }],
   }
   presets.message_hide = {
     type: 'button', category: 'Messages', name: 'HIDE MESSAGE',
@@ -75,7 +75,7 @@ module.exports = function (self) {
     type: 'button', category: 'NDI', name: 'NDI START / STOP',
     style: { text: 'NDI\nSTART / STOP', size: '14', color: white, bgcolor: combineRgb(57, 68, 81) },
     steps: [{ down: [{ actionId: 'ndi', options: { operation: 'toggle' } }], up: [] }],
-    feedbacks: [{ feedbackId: 'ndi_running', options: {} }],
+    feedbacks: [{ feedbackId: 'ndi_running', options: {}, style: { bgcolor: combineRgb(23, 111, 86), color: white } }],
   }
 
   self.setPresetDefinitions(presets)

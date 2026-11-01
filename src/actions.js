@@ -11,6 +11,21 @@ function intOption(id, label, defaultValue, min, max) {
   return { type: 'number', id, label, default: defaultValue, min, max, step: 1 }
 }
 
+// Companion number inputs may be empty, decimal or NaN despite step: 1.
+// Reject invalid inputs; round/clamp finite values so OSC always receives int32.
+function validInt(self, input, min, max, label) {
+  if (input === '' || input === null || input === undefined) {
+    self.log('warn', `Invalid ${label}: enter an integer`)
+    return null
+  }
+  const numeric = Number(input)
+  if (!Number.isFinite(numeric)) {
+    self.log('warn', `Invalid ${label}: enter a finite number`)
+    return null
+  }
+  return Math.max(min, Math.min(max, Math.round(numeric)))
+}
+
 function validTimer(value) {
   return /^[a-f0-9]{32}$/i.test(String(value)) || /^[1-8]$/.test(String(value))
 }
@@ -41,26 +56,32 @@ module.exports = function (self) {
     timer_title: {
       name: 'Timer: SET TITLE',
       options: [timerOption(self),
-        { type: 'textinput', id: 'title', label: 'Title', default: 'TIMER' }],
-      callback: (action) => {
-        const title = String(action.options.title || '').trim()
+        { type: 'textinput', id: 'title', label: 'Title', default: 'TIMER', useVariables: true }],
+      callback: async (action) => {
+        const expanded = await self.parseVariablesInString(String(action.options.title ?? ''))
+        const title = String(expanded).trim()
         if (title.length >= 1 && title.length <= 128) self.sendTimer(action.options.timer, 'title', [title])
+        else self.log('warn', 'Timer title must contain 1 to 128 characters')
       },
     },
     set_time: {
       name: 'Countdown: SET TIME',
       options: [timerOption(self), intOption('hours', 'Hours', 0, 0, 23),
         intOption('minutes', 'Minutes', 5, 0, 59), intOption('seconds', 'Seconds', 0, 0, 59)],
-      callback: (action) => self.sendTimer(action.options.timer, 'set_time', [
-        Number(action.options.hours), Number(action.options.minutes), Number(action.options.seconds),
-      ]),
+      callback: (action) => {
+        const hours = validInt(self, action.options.hours, 0, 23, 'Hours')
+        const minutes = validInt(self, action.options.minutes, 0, 59, 'Minutes')
+        const seconds = validInt(self, action.options.seconds, 0, 59, 'Seconds')
+        if ([hours, minutes, seconds].includes(null)) return
+        self.sendTimer(action.options.timer, 'set_time', [hours, minutes, seconds])
+      },
     },
     adjust: {
       name: 'Countdown: ADD / SUBTRACT SECONDS',
       options: [timerOption(self), intOption('seconds', 'Signed seconds', 30, -86399, 86399)],
       callback: (action) => {
-        const seconds = Number(action.options.seconds)
-        if (Number.isInteger(seconds) && seconds !== 0) self.sendTimer(action.options.timer, 'adjust', [seconds])
+        const seconds = validInt(self, action.options.seconds, -86399, 86399, 'Signed seconds')
+        if (seconds !== null && seconds !== 0) self.sendTimer(action.options.timer, 'adjust', [seconds])
       },
     },
     template: {
@@ -83,9 +104,12 @@ module.exports = function (self) {
       description: 'COUNTDOWN, SEQUENCE or END TIME. 0 disables a warning.',
       options: [timerOption(self), intOption('yellow', 'Yellow warning (seconds)', 120, 0, 59999),
         intOption('red', 'Red warning (seconds)', 30, 0, 59999)],
-      callback: (action) => self.sendTimer(action.options.timer, 'warnings', [
-        Number(action.options.yellow), Number(action.options.red),
-      ]),
+      callback: (action) => {
+        const yellow = validInt(self, action.options.yellow, 0, 59999, 'Yellow warning')
+        const red = validInt(self, action.options.red, 0, 59999, 'Red warning')
+        if (yellow === null || red === null) return
+        self.sendTimer(action.options.timer, 'warnings', [yellow, red])
+      },
     },
     next_round: {
       name: 'Sequence: NEXT ROUND',
@@ -108,15 +132,22 @@ module.exports = function (self) {
     clock_offset: {
       name: 'Clock: SET OFFSET',
       options: [timerOption(self), intOption('hours', 'Offset hours', 0, -26, 26)],
-      callback: (action) => self.sendTimer(action.options.timer, 'clock_offset', [Number(action.options.hours)]),
+      callback: (action) => {
+        const hours = validInt(self, action.options.hours, -26, 26, 'Clock offset hours')
+        if (hours !== null) self.sendTimer(action.options.timer, 'clock_offset', [hours])
+      },
     },
     end_time: {
       name: 'End Time: SET TARGET',
       options: [timerOption(self), intOption('hours', 'Hours', 21, 0, 23),
         intOption('minutes', 'Minutes', 0, 0, 59), intOption('seconds', 'Seconds', 0, 0, 59)],
-      callback: (action) => self.sendTimer(action.options.timer, 'end_time', [
-        Number(action.options.hours), Number(action.options.minutes), Number(action.options.seconds),
-      ]),
+      callback: (action) => {
+        const hours = validInt(self, action.options.hours, 0, 23, 'Hours')
+        const minutes = validInt(self, action.options.minutes, 0, 59, 'Minutes')
+        const seconds = validInt(self, action.options.seconds, 0, 59, 'Seconds')
+        if ([hours, minutes, seconds].includes(null)) return
+        self.sendTimer(action.options.timer, 'end_time', [hours, minutes, seconds])
+      },
     },
     progress: {
       name: 'Timer: PROGRESS BAR ON / OFF',

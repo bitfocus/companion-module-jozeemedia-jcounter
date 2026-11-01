@@ -17,6 +17,8 @@ class JCounterModule extends InstanceBase {
     this.socketReady = false
     this.pollTimer = null
     this.lastSeen = 0
+    this.connectStarted = 0
+    this.noReplyReported = false
     this.isConnected = false
     this.choicesSignature = ''
     this.messageActive = false
@@ -28,6 +30,11 @@ class JCounterModule extends InstanceBase {
 
   async init(config) {
     this.config = config
+    // A v2 connection needs an explicit selection of v3.0.1 and newly configured actions.
+    // Never silently reinterpret old v2 actions: they use a different OSC protocol.
+    if (typeof config?.feedbackPort === 'number') {
+      this.log('warn', 'J-COUNTER v3 uses a new OSC protocol. Existing v2 buttons/feedbacks must be rebuilt or kept on module v2.0.1.')
+    }
     this.updateStatus(InstanceStatus.Connecting)
     this.updateDefinitions()
     this.startUdp()
@@ -95,22 +102,36 @@ class JCounterModule extends InstanceBase {
     })
     this.osc.on('ready', () => {
       this.socketReady = true
+      this.connectStarted = Date.now()
+      this.noReplyReported = false
       this.sendOsc('/jcounter/subscribe', [localPort])
       this.pollTimer = setInterval(() => {
         this.sendOsc('/jcounter/subscribe', [localPort])
-        if (this.isConnected && Date.now() - this.lastSeen > 8000) {
+        const now = Date.now()
+        if (this.isConnected && now - this.lastSeen > 8000) {
           this.isConnected = false
           this.timers = []
+          this.noReplyReported = true
           this.updateStatus(InstanceStatus.ConnectionFailure, 'J-Counter OSC not responding')
           UpdateVariables.update(this)
           this.checkFeedbacks()
+        } else if (!this.isConnected && !this.noReplyReported &&
+            this.connectStarted > 0 && now - this.connectStarted > 8000) {
+          this.noReplyReported = true
+          this.updateStatus(InstanceStatus.ConnectionFailure,
+            'No reply from J-COUNTER. Check the IP address, port and OSC service.')
         }
       }, 3000)
     })
     this.osc.on('message', (message) => this.onMessage(message))
     this.osc.on('error', (error) => {
       this.log('error', `OSC socket error: ${error.message}`)
+      // The next valid hello must restore green/OK even after a transient error.
+      this.isConnected = false
+      this.noReplyReported = true
       this.updateStatus(InstanceStatus.ConnectionFailure, `OSC: ${error.message}`)
+      UpdateVariables.update(this)
+      this.checkFeedbacks()
     })
     this.osc.open()
   }
@@ -170,6 +191,7 @@ class JCounterModule extends InstanceBase {
         return
       }
       this.lastSeen = Date.now()
+      this.noReplyReported = false
       if (!this.isConnected) {
         this.isConnected = true
         this.updateStatus(InstanceStatus.Ok)
@@ -241,6 +263,8 @@ class JCounterModule extends InstanceBase {
 
   closeUdp() {
     this.socketReady = false
+    this.connectStarted = 0
+    this.noReplyReported = false
     if (this.pollTimer) clearInterval(this.pollTimer)
     this.pollTimer = null
     if (this.osc) {

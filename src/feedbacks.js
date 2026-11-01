@@ -28,7 +28,6 @@ module.exports = function (self) {
     timer_display: {
       type: 'advanced',
       name: 'Timer display: live title / time / colors',
-      affectedProperties: ['bgcolor', 'color', 'text'],
       options: [timerOption(),
         { type: 'checkbox', id: 'showName', label: 'Show title', default: true }],
       callback: (feedback) => {
